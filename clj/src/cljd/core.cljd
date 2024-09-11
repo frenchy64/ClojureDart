@@ -5839,7 +5839,8 @@
 (defn split-at
   "Returns a vector of [(take n coll) (drop n coll)]"
   [n coll]
-  [(take n coll) (drop n coll)])
+  (let [coll (cond-> coll (not (coll? coll)) sequence)]
+    [(take n coll) (drop n coll)]))
 
 (defn take-nth
   "Returns a lazy seq of every nth item in coll.  Returns a stateful
