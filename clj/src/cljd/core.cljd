@@ -5834,13 +5834,13 @@
 (defn split-with
   "Returns a vector of [(take-while pred coll) (drop-while pred coll)]"
   [pred coll]
-  (let [coll (cond-> coll (not (coll? coll)) seq)]
+  (let [coll (cond-> coll (not (coll? coll)) lazy-seq)]
     [(take-while pred coll) (drop-while pred coll)]))
 
 (defn split-at
   "Returns a vector of [(take n coll) (drop n coll)]"
   [n coll]
-  (let [coll (cond-> coll (not (coll? coll)) seq)]
+  (let [coll (cond-> coll (not (coll? coll)) lazy-seq)]
     [(take n coll) (drop n coll)]))
 
 (defn take-nth
