@@ -1201,25 +1201,27 @@
     (is (= 0 (last ed)))
     (is (= 1 (last ed)))))
 
-;(deftest butlast-mutation-test
-;  (let [t-f (atom false)
-;        init! #(reset! t-f false)
-;        ed (eduction (filter (fn [i]
-;                               (when (zero? i)
-;                                 (swap! t-f not))
-;                               (if @t-f
-;                                 (< i 2)
-;                                 (< i 0))))
-;                     (range 3))]
-;    (testing "eduction alternates"
-;      (init!)
-;      (is (= [[0 1]
-;              []
-;              [0 1]
-;              []]
-;             (repeatedly 4 #(vec ed)))))
-;    (init!)
-;    (is (= [0] (butlast ed)))))
+(deftest butlast-mutation-test
+  (let [t-f (atom false)
+        init! #(reset! t-f false)
+        ed (eduction (filter (fn [i]
+                               (when (zero? i)
+                                 (swap! t-f not))
+                               (if @t-f
+                                 (< i 2)
+                                 (< i 0))))
+                     (range 3))]
+    (testing "eduction alternates"
+      (init!)
+      (is (= [[0 1]
+              []
+              [0 1]
+              []]
+             (repeatedly 4 #(vec ed)))))
+    (init!)
+    (is (= [0] (butlast ed)))
+    (is (= nil (butlast ed)))
+    (is (= [0] (butlast ed)))))
 
 (deftest lazy-seq-should-realize-seq-once
   (let [a (atom 0)
