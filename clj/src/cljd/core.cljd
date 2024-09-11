@@ -5783,7 +5783,8 @@
 (defn drop-last
   "Return a lazy sequence of all but the last n (default 1) items in coll"
   ([coll] (drop-last 1 coll))
-  ([n coll] (map (fn [x _] x) coll (drop n coll))))
+  ([n coll] (let [coll (cond-> coll (not (coll? coll)) lazy-seq)]
+              (map (fn [x _] x) coll (drop n coll)))))
 
 (defn take
   "Returns a lazy sequence of the first n items in coll, or all items if
@@ -5864,10 +5865,11 @@
   "Returns a seq of the last n items in coll.  Depending on the type
   of coll may be no better than linear time.  For vectors, see also subvec."
   [n coll]
-  (loop [s (seq coll) lead (seq (drop n coll))]
-    (if lead
-      (recur (next s) (next lead))
-      s)))
+  (let [coll (cond-> coll (not (coll? coll)) lazy-seq)]
+    (loop [s (seq coll) lead (seq (drop n coll))]
+      (if lead
+        (recur (next s) (next lead))
+        s))))
 
 (defn repeat
   "Returns a lazy (infinite!, or length n if supplied) sequence of xs."
