@@ -5690,10 +5690,11 @@
 (defn last
   "Return the last item in coll, in linear time"
   [s]
-  (let [sn (next s)]
-    (if-not (nil? sn)
-      (recur sn)
-      (first s))))
+  (let [s (seq s)]
+    (let [sn (-next s)]
+      (if-not (nil? sn)
+        (recur sn)
+        (-first s)))))
 
 (defn butlast
   "Return a seq of all but the last item in coll, in linear time"
