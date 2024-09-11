@@ -1216,3 +1216,10 @@
 ;             (repeatedly 4 #(vec ed)))))
 ;    (init!)
 ;    (is (= [0] (butlast ed)))))
+
+(deftest lazy-seq-should-realize-seq-once
+  (let [a (atom 0)
+        x (eduction (map (fn [_] (swap! a inc))) [nil])
+        l (lazy-seq x)]
+    (dotimes [_ 10]
+      (is (= [1] l)))))
