@@ -5325,9 +5325,10 @@
   [coll]
   (if (dart/is? coll List)
     (.toList ^List coll .growable false)
-    (let [length (count coll)
+    (let [coll (seq coll)
+          length (count coll)
           ^#/(List dynamic) ary (.filled List length nil)]
-      (loop [s (seq coll)
+      (loop [s coll
              ^int idx 0]
         (if-not (nil? s)
           (do (aset ary idx (first s))
@@ -7153,12 +7154,19 @@
   ([coll]
    (sort compare coll))
   ([comp coll]
-   (if (seq coll)
-     (let [a (to-array coll)
-           comp' (dart-comparator comp)]
-       (.sort ^List a comp')
-       (with-meta (seq a) (meta coll)))
-     ())))
+   (cond
+     (nil? coll) ()
+     (coll? coll) (if (seq coll)
+                    (let [a (to-array coll)
+                          comp' (dart-comparator comp)]
+                      (.sort ^List a comp')
+                      (with-meta (seq a) (meta coll)))
+                    ())
+     :else (let [a (to-array coll)]
+             (if (pos? (alength a))
+               (do (.sort ^List a (dart-comparator comp))
+                   (with-meta (seq a) (meta coll)))
+               ())))))
 
 (defn sort-by
   "Returns a sorted sequence of the items in coll, where the sort

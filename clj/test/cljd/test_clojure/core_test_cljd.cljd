@@ -1141,24 +1141,25 @@
     (init!)
     (is (= [5 6 7 8 9] (take-last 5 ed)))))
 
-;(deftest sort-mutation-test
-;  (let [t-f (atom false)
-;        init! #(reset! t-f false)
-;        ed (eduction (filter (fn [i]
-;                               (when (zero? i)
-;                                 (swap! t-f not))
-;                               @t-f))
-;                     (range 10))]
-;    (testing "eduction alternates"
-;      (init!)
-;      (is (= [[0 1 2 3 4 5 6 7 8 9]
-;              []
-;              [0 1 2 3 4 5 6 7 8 9]
-;              []]
-;             (repeatedly 4 #(vec ed)))))
-;    (init!)
-;    (is (= [] (sort ed)))))
-;
+(deftest sort-mutation-test
+  (let [t-f (atom false)
+        init! #(reset! t-f false)
+        ed (eduction (filter (fn [i]
+                               (when (zero? i)
+                                 (swap! t-f not))
+                               @t-f))
+                     (range 10))]
+    (testing "eduction alternates"
+      (init!)
+      (is (= [[0 1 2 3 4 5 6 7 8 9]
+              []
+              [0 1 2 3 4 5 6 7 8 9]
+              []]
+             (repeatedly 4 #(vec ed)))))
+    (init!)
+    (is (= [0 1 2 3 4 5 6 7 8 9] (sort ed)))
+    (is (= [] (sort ed)))))
+
 ;(deftest sort-by-mutation-test
 ;  (let [t-f (atom false)
 ;        init! #(reset! t-f false)
