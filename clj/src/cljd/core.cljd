@@ -3245,7 +3245,7 @@
        h#)))
 
 (deftype #/(Cons E)
-  [meta _first rest next ^:mutable ^int __hash]
+  [meta _first ^ISeq rest ^:mutable ^int __hash]
   :type-only true
   ^:mixin EquivSequentialHashMixin
   ^:mixin #/(dart-coll/ListMixin E)
@@ -3262,8 +3262,8 @@
   (-meta [coll] meta)
   ISeq
   (-first [coll] _first)
-  (-rest [coll] (if (nil? rest) () rest))
-  (-next [coll] (if (nil? rest) nil (seq rest)))
+  (-rest [coll] rest)
+  (-next [coll] (-seq rest))
   ICollection
   (-conj [coll o] (Cons. nil o coll -1))
   IEmptyableCollection
@@ -3354,12 +3354,14 @@
   (cond
     (nil? coll)            (PersistentList. nil x nil 1 -1)
     (satisfies? ISeq coll) (Cons. nil x coll -1)
-    ;;bug: realizes next
-    true                   (Cons. nil x (seq coll) -1)))
+    ;; calling seq here realizes eductions, so we wrap in a lazy seq.
+    ;; LazySeq's .sval only calls fn if it's a Fn, so we can avoid the cost of a thunk.
+    (not (satisfies? Fn coll)) (Cons. nil x (LazySeq. nil coll nil -1) -1)
+    :else (throw (ArgumentError. "Cannot create cons from Fn"))))
 
 (defn ^some iterator-seq [^Iterator iter]
   (when (.moveNext iter)
-    (Cons. nil (.-current iter) (lazy-seq (iterator-seq iter)) -1)))
+    (cons (.-current iter) (lazy-seq (iterator-seq iter)))))
 
 (declare chunked-iterator-sequence)
 
@@ -3530,7 +3532,7 @@
     (if (nil? fn)
       s
       (do
-        (loop [ls (fn)]
+        (loop [ls (if (dart/is? ls Fn) (fn) fn)]
           (if (dart/is? ls LazySeq)
             (recur (.sval ^LazySeq ls))
             (set! s (seq ls))))
@@ -3538,7 +3540,7 @@
         s)))
   IPending
   (-realized? [coll]
-    (not fn))
+    (nil? fn))
   IWithMeta
   (-with-meta [coll new-meta]
     (if (identical? new-meta meta)
