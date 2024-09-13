@@ -1114,17 +1114,27 @@
         (sequence (map (fn [_] (swap! realized inc))) (lazy-range))
         (is (= 0 @realized)))))
   (testing "sequence rest"
-    (testing "map rest"
-      (let [realized (atom 0)]
-        (rest (sequence (map (fn [_] (swap! realized inc)) (lazy-range))))
-        (is (= 0 @realized))))
     (let [realized (atom 0)]
       (rest (sequence (map (fn [_] (swap! realized inc)) (lazy-range))))
-      (is (= 0 @realized)))
+      (is (= 1 @realized)))
     (testing "transducer"
       (let [realized (atom 0)]
         (rest (sequence (map (fn [_] (swap! realized inc))) (lazy-range)))
-        (is (= 0 @realized)))))
+        (is (= 32 @realized)))))
+  (testing "sequence nthrest"
+    (let [realized (atom 0)]
+      (nthrest (sequence (map (fn [_] (swap! realized inc)) (lazy-range))) 32)
+      (is (= 32 @realized)))
+    (let [realized (atom 0)]
+      (nthrest (sequence (map (fn [_] (swap! realized inc)) (lazy-range))) 33)
+      (is (= 33 @realized)))
+    (testing "transducer"
+      (let [realized (atom 0)]
+        (nthrest (sequence (map (fn [_] (swap! realized inc))) (lazy-range)) 32)
+        (is (= 32 @realized)))
+      (let [realized (atom 0)]
+        (nthrest (sequence (map (fn [_] (swap! realized inc))) (lazy-range)) 33)
+        (is (= 64 @realized)))))
   (testing "sequence seq"
     (let [realized (atom 0)]
       (seq (sequence (map (fn [_] (swap! realized inc)) (lazy-range))))
@@ -1153,10 +1163,10 @@
       (is (= 32 @realized)))))
 
 (deftest lazy-seq-hygiene-test
-  (seq (lazy-seq {:pre [false]} [])))
+  (is (= [1] (lazy-seq {:pre [false]} [1]))))
 
 (deftest delay-hygiene-test
-  (seq (delay {:pre [false]} [])))
+  (is (= 1 @(delay {:pre [false]} 1))))
 
 ;; https://clojure.atlassian.net/browse/CLJ-2874
 (defn at-form-arg [&form] &form)
