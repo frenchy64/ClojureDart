@@ -3245,7 +3245,7 @@
        h#)))
 
 (deftype #/(Cons E)
-  [meta _first rest ^:mutable ^int __hash]
+  [meta _first rest next ^:mutable ^int __hash]
   :type-only true
   ^:mixin EquivSequentialHashMixin
   ^:mixin #/(dart-coll/ListMixin E)
@@ -3354,48 +3354,39 @@
   (cond
     (nil? coll)            (PersistentList. nil x nil 1 -1)
     (satisfies? ISeq coll) (Cons. nil x coll -1)
+    ;;bug: realizes next
     true                   (Cons. nil x (seq coll) -1)))
-
-(deftype #/(IteratorSeq E)
-  [meta value ^Iterator iter ^:mutable ^some _rest ^:mutable ^int __hash]
-  :type-only true
-  ^:mixin #/(dart-coll/ListMixin E)
-  ^:mixin EquivSequentialHashMixin
-  ^:mixin #/(SeqListMixin E)
-  (^#/(IteratorSeq R) #/(cast R) [coll]
-   (new #/(IteratorSeq R) meta value iter _rest __hash))
-  ISeqable
-  (-seq [this] this)
-  ISeq
-  (-first [coll] value)
-  (-rest [coll] (or _rest (set! _rest (or (iterator-seq iter) ()))))
-  (-next [coll] (-seq (-rest coll)))
-  ICollection
-  (-conj [coll o] (cons o coll))
-  IMeta
-  (-meta [coll] meta)
-  IWithMeta
-  (-with-meta [coll new-meta]
-    (if (identical? new-meta meta)
-      coll
-      (IteratorSeq. new-meta value iter _rest __hash))))
 
 (defn ^some iterator-seq [^Iterator iter]
   (when (.moveNext iter)
-    (IteratorSeq. nil (.-current iter) iter nil -1)))
+    (Cons. nil (.-current iter) (lazy-seq (iterator-seq iter)) -1)))
+
+(declare chunked-iterator-sequence)
+
+;; assumes (.moveNext iter)
+(defn- chunked-iterator-seq*
+  [^Iterator iter ^int chunk-size]
+  (let [buf (chunk-buffer chunk-size)]
+    (chunk-append buf (.-current iter))
+    (loop [^int rem (dec chunk-size)]
+      (when (and (pos? rem) (.moveNext iter))
+        (chunk-append buf (.-current iter))
+        (recur (dec rem))))
+    (chunk-cons (chunk buf) (chunked-iterator-sequence iter chunk-size))))
+
+(defn chunked-iterator-sequence
+  ([^Iterator iter] (chunked-iterator-sequence iter 32))
+  ([^Iterator iter ^int chunk-size]
+   (lazy-seq
+     (when (.moveNext iter)
+       (chunked-iterator-seq* iter chunk-size)))))
 
 (defn ^some chunked-iterator-seq
   ([^Iterator iter] (chunked-iterator-seq iter 32))
   ([^Iterator iter ^int chunk-size]
    (when (.moveNext iter)
      (lazy-seq
-       (let [buf (chunk-buffer chunk-size)]
-         (chunk-append buf (.-current iter))
-         (loop [^int rem (dec chunk-size)]
-           (when (and (pos? rem) (.moveNext iter))
-             (chunk-append buf (.-current iter))
-             (recur (dec rem))))
-         (chunk-cons (chunk buf) (chunked-iterator-seq iter chunk-size)))))))
+       (chunked-iterator-seq* iter chunk-size)))))
 
 (extend-type Iterable
   ISeqable
@@ -7282,7 +7273,7 @@
 
 (defn sequence
   "Coerces coll to a (possibly empty) sequence, if it is not already
-  one. Will not force a lazy seq. (sequence nil) yields (), When a
+  one. Will not force a lazy seq. (sequence nil) yields (). When a
   transducer is supplied, returns a lazy sequence of applications of
   the transform to the items in coll(s), i.e. to the set of first
   items of each coll, followed by the set of second
@@ -7293,9 +7284,9 @@
      (if (seq? coll) coll
          (or (seq coll) ())))
   ([xform coll]
-     (or (chunked-iterator-seq (iterator xform coll)) ()))
+     (chunked-iterator-sequence (iterator xform coll)))
   ([xform coll & colls]
-   (or (chunked-iterator-seq (apply iterator xform coll colls)) ())))
+   (chunked-iterator-sequence (apply iterator xform coll colls))))
 
 (deftype #/(Eduction E)
   [xform coll ^:mutable ^int __hash]

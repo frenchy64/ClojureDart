@@ -1069,7 +1069,7 @@
                     (cons i (step (inc i))))))]
      (step 0))))
 
-(deftest lazier-bounded-count-test
+(deftest bounded-count-laziness-test
   (testing "semantics"
     (dotimes [i 20]
       (testing (pr-str i)
@@ -1078,14 +1078,56 @@
         (is (= 0 (bounded-count i (lazy-range 0))))
         (is (= i (bounded-count i (lazy-range i)))))))
   (testing "bounded-count 0"
-    (let [realized (atom #{})]
-      (is (= 0 (bounded-count 0 (map #(swap! realized conj %) (lazy-range)))))
-      (is (= #{} @realized))))
+    (let [realized (atom 0)]
+      (is (= 0 (bounded-count 0 (map (fn [_] (swap! realized inc)) (lazy-range)))))
+      (is (= 0 @realized))))
   (testing "bounded-count 1"
-    (let [realized (atom #{})]
-      (is (= 1 (bounded-count 1 (map #(swap! realized conj %) (lazy-range)))))
-      (is (= #{0} @realized))))
+    (let [realized (atom 0)]
+      (is (= 1 (bounded-count 1 (map (fn [_] (swap! realized inc)) (lazy-range)))))
+      (is (= 1 @realized))))
   (testing "bounded-count 10"
-    (let [realized (atom #{})]
-      (is (= 10 (bounded-count 10 (map #(swap! realized conj %) (lazy-range)))))
-      (is (= (into (sorted-set) (range 10)) @realized)))))
+    (let [realized (atom 0)]
+      (is (= 10 (bounded-count 10 (map (fn [_] (swap! realized inc)) (lazy-range)))))
+      (is (= 10 @realized)))))
+
+(deftest iterator-seq-laziness-test
+  (testing "iterator-seq init"
+    (let [realized (atom 0)]
+      (iterator-seq (.-iterator (map (fn [_] (swap! realized inc)) (lazy-range))))
+      (is (= 1 @realized))))
+  (testing "iterator-seq rest"
+    (let [realized (atom 0)]
+      (rest (iterator-seq (.-iterator (map (fn [_] (swap! realized inc)) (lazy-range)))))
+      (is (= 1 @realized))))
+  (testing "iterator-seq next"
+    (let [realized (atom 0)]
+      (next (iterator-seq (.-iterator (map (fn [_] (swap! realized inc)) (lazy-range)))))
+      (is (= 2 @realized)))))
+
+(deftest sequence-laziness-test
+  (testing "sequence init"
+    (let [realized (atom 0)]
+      (sequence (map (fn [_] (swap! realized inc)) (lazy-range)))
+      (is (= 0 @realized)))
+    (testing "transducer"
+      (let [realized (atom 0)]
+        (sequence (map (fn [_] (swap! realized inc))) (lazy-range))
+        (is (= 0 @realized)))))
+  (testing "sequence next"
+    (let [realized (atom 0)]
+      (next (sequence (map (fn [_] (swap! realized inc)) (lazy-range))))
+      (is (= 32 @realized)))
+    (testing "transducer"
+      (let [realized (atom 0)]
+        (next (sequence (map (fn [_] (swap! realized inc)) (lazy-range))))
+        (is (= 32 @realized))))))
+
+(deftest dedupe-laziness-test
+  (testing "dedupe init"
+    (let [realized (atom 0)]
+      (dedupe (map (fn [_] (swap! realized inc)) (lazy-range)))
+      (is (= 0 @realized))))
+  (testing "dedupe seq"
+    (let [realized (atom 0)]
+      (seq (dedupe (map (fn [_] (swap! realized inc)) (lazy-range))))
+      (is (= 32 @realized)))))
