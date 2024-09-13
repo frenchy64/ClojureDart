@@ -1059,3 +1059,33 @@
                               ([result input]
                                (reduced {:cljd.core/halt :should-be-wrapped})))))
                  [1])))))
+
+(defn lazy-range
+  ([] (lazy-range ##Inf))
+  ([end]
+   (let [step (fn step [i]
+                (lazy-seq
+                  (when (< i end)
+                    (cons i (step (inc i))))))]
+     (step 0))))
+
+(deftest lazier-bounded-count-test
+  (testing "semantics"
+    (dotimes [i 20]
+      (testing (pr-str i)
+        (is (= i (bounded-count 0 (vec (range i)))))
+        (is (= (min i 10) (bounded-count i (lazy-range 10))))
+        (is (= 0 (bounded-count i (lazy-range 0))))
+        (is (= i (bounded-count i (lazy-range i)))))))
+  (testing "bounded-count 0"
+    (let [realized (atom #{})]
+      (is (= 0 (bounded-count 0 (map #(swap! realized conj %) (lazy-range)))))
+      (is (= #{} @realized))))
+  (testing "bounded-count 1"
+    (let [realized (atom #{})]
+      (is (= 1 (bounded-count 1 (map #(swap! realized conj %) (lazy-range)))))
+      (is (= #{0} @realized))))
+  (testing "bounded-count 10"
+    (let [realized (atom #{})]
+      (is (= 10 (bounded-count 10 (map #(swap! realized conj %) (lazy-range)))))
+      (is (= (into (sorted-set) (range 10)) @realized)))))

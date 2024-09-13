@@ -1235,10 +1235,14 @@
   [n coll]
   (if (counted? coll)
     (count coll)
-    (loop [^int i 0 s (seq coll)]
-      (if (and s (< i n))
-        (recur (inc i) (next s))
-        i))))
+    (if (pos? n)
+      (loop [^int i 0 s (seq coll)]
+        (if (some? s)
+          (let [i (inc i)]
+            (cond-> i
+              (< i n) (recur (next s))))
+          i))
+      0)))
 
 (defprotocol IChunk
   "Protocol for accessing the items of a chunk."
@@ -8381,7 +8385,7 @@ specified.
   comparator.  If any keys are equal, they are handled as if by
   repeated uses of assoc."
   ([comparator & keyvals]
-   (loop [m (HashRankedWideTreapMap nil -empty-treap-node 0 (dart-comparator comparator) comparator -1) kvs (seq keyvals)]
+   (loop [m (HashRankedWideTreapMap nil -empty-treap-node 0 (dart-comparator comparator) comparator -1) kvs keyvals]
      (if-some [[k & vkvs] kvs]
        (if-some [[v & kvs] vkvs]
          (recur (assoc m k v) kvs)
@@ -8665,7 +8669,7 @@ specified.
   conj."
   ([comparator & keys]
    (loop [m (HashRankedWideTreapSet. nil -empty-treap-node 0 (dart-comparator comparator) comparator -1)
-          ks (seq keys)]
+          ks keys]
      (if-some [[k & ks'] ks]
        (recur (conj m k) ks')
        m))))
