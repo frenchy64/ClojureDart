@@ -105,13 +105,13 @@
 
 (def ^:macro-support ^:private
   sigs
-  (fn [fdecl]
+  (fn [defmacro? fdecl]
     #_(assert-valid-fdecl fdecl)
     (let [asig
           (fn [fdecl]
             (let [arglist (first fdecl)
                   ;elide implicit macro args
-                  arglist (if (= '&form (first arglist))
+                  arglist (if defmacro?
                             (subvec arglist 2 (count arglist))
                             arglist)
                   body (next fdecl)]
@@ -142,6 +142,56 @@
             (seq ret)))
         (list (resolve-tag (asig fdecl)))))))
 
+(def ^:macro-support ^:private
+  defn-helper
+  (fn [defmacro? fname & fdecl]
+      ;; Note: Cannot delegate this check to def because of the call to (with-meta name ..)
+      (if (symbol? fname)
+        nil
+        (throw (argument-error "First argument to defn must be a symbol")))
+      (let [m (if (string? (first fdecl))
+                {:doc (first fdecl)}
+                {})
+            fdecl (if (string? (first fdecl))
+                    (next fdecl)
+                    fdecl)
+            m (if (map? (first fdecl))
+                (conj m (first fdecl))
+                m)
+            fdecl (if (map? (first fdecl))
+                    (next fdecl)
+                    fdecl)
+            fdecl (if (vector? (first fdecl))
+                    (list fdecl)
+                    fdecl)
+            m (if (map? (last fdecl))
+                (conj m (last fdecl))
+                m)
+            fdecl (if (map? (last fdecl))
+                    (butlast fdecl)
+                    fdecl)
+            m (conj {:arglists (list 'quote (sigs defmacro? fdecl))} m)
+            m (let [inline (:inline m)
+                    ifn (first inline)
+                    iname (second inline)]
+                ;; same as: (if (and (= 'fn ifn) (not (symbol? iname))) ...)
+                (if (if (= 'fn ifn)
+                      (if (symbol? iname) false true))
+                  ;; inserts the same fn name to the inline fn if it does not have one
+                  (assoc m :inline (cons ifn (cons (symbol (str (name fname) "__inliner"))
+                                                   (next inline))))
+                  m))
+            tag (or (when-not (next fdecl)
+                      ; when one arity, look at meta
+                      (-> fdecl ffirst meta :tag))
+                  (:tag (meta fname)))
+            m (assoc m :tag tag :schroupt (list 'quote (first fdecl)))
+            m (conj (if (meta fname) (meta fname) {}) m)]
+        (list 'def (with-meta fname m)
+              ;;todo - restore propagation of fn name
+              ;;must figure out how to convey primitive hints to self calls first
+              (with-meta (cons `fn fdecl) {:rettag (:tag m) :async (:async m)})))))
+
 (def
   ^{:macro true
     :doc "Same as (def name (fn [params* ] exprs*)) or (def
@@ -151,52 +201,7 @@
    :arglists '([name doc-string? attr-map? [params*] prepost-map? body]
                 [name doc-string? attr-map? ([params*] prepost-map? body)+ attr-map?])}
  defn (fn defn [&form &env fname & fdecl]
-        ;; Note: Cannot delegate this check to def because of the call to (with-meta name ..)
-        (if (symbol? fname)
-          nil
-          (throw (argument-error "First argument to defn must be a symbol")))
-        (let [m (if (string? (first fdecl))
-                  {:doc (first fdecl)}
-                  {})
-              fdecl (if (string? (first fdecl))
-                      (next fdecl)
-                      fdecl)
-              m (if (map? (first fdecl))
-                  (conj m (first fdecl))
-                  m)
-              fdecl (if (map? (first fdecl))
-                      (next fdecl)
-                      fdecl)
-              fdecl (if (vector? (first fdecl))
-                      (list fdecl)
-                      fdecl)
-              m (if (map? (last fdecl))
-                  (conj m (last fdecl))
-                  m)
-              fdecl (if (map? (last fdecl))
-                      (butlast fdecl)
-                      fdecl)
-              m (conj {:arglists (list 'quote (sigs fdecl))} m)
-              m (let [inline (:inline m)
-                      ifn (first inline)
-                      iname (second inline)]
-                  ;; same as: (if (and (= 'fn ifn) (not (symbol? iname))) ...)
-                  (if (if (= 'fn ifn)
-                        (if (symbol? iname) false true))
-                    ;; inserts the same fn name to the inline fn if it does not have one
-                    (assoc m :inline (cons ifn (cons (symbol (str (name fname) "__inliner"))
-                                                     (next inline))))
-                    m))
-              tag (or (when-not (next fdecl)
-                        ; when one arity, look at meta
-                        (-> fdecl ffirst meta :tag))
-                    (:tag (meta fname)))
-              m (assoc m :tag tag :schroupt (list 'quote (first fdecl)))
-              m (conj (if (meta fname) (meta fname) {}) m)]
-          (list 'def (with-meta fname m)
-                ;;todo - restore propagation of fn name
-                ;;must figure out how to convey primitive hints to self calls first
- 								(with-meta (cons `fn fdecl) {:rettag (:tag m) :async (:async m)})))))
+        (apply defn-helper false fname fdecl)))
 
 (def
  ^{:macro true
@@ -240,7 +245,7 @@
                           (if p
                             (recur (next p) (cons (first p) d))
                             d))]
-               (cons `defn decl))))
+               (apply defn-helper true decl))))
 
 (defmacro defn-
   "same as defn, yielding non-public def"
@@ -1235,10 +1240,14 @@
   [n coll]
   (if (counted? coll)
     (count coll)
-    (loop [^int i 0 s (seq coll)]
-      (if (and s (< i n))
-        (recur (inc i) (next s))
-        i))))
+    (if (pos? n)
+      (loop [^int i 0 s (seq coll)]
+        (if (some? s)
+          (let [i (inc i)]
+            (cond-> i
+              (< i n) (recur (next s))))
+          i))
+      0)))
 
 (defprotocol IChunk
   "Protocol for accessing the items of a chunk."
@@ -2323,7 +2332,7 @@
     x))
 
 (defmacro delay [& body]
-  `(new cljd.core/Delay nil (fn [] ~@body)))
+  `(new cljd.core/Delay nil (fn [] (do ~@body))))
 
 (defprotocol IEmptyableCollection
   "Protocol for creating an empty collection."
@@ -3258,8 +3267,8 @@
   (-meta [coll] meta)
   ISeq
   (-first [coll] _first)
-  (-rest [coll] (if (nil? rest) () rest))
-  (-next [coll] (if (nil? rest) nil (seq rest)))
+  (-rest [coll] rest)
+  (-next [coll] (-seq rest))
   ICollection
   (-conj [coll o] (Cons. nil o coll -1))
   IEmptyableCollection
@@ -3350,48 +3359,41 @@
   (cond
     (nil? coll)            (PersistentList. nil x nil 1 -1)
     (satisfies? ISeq coll) (Cons. nil x coll -1)
-    true                   (Cons. nil x (seq coll) -1)))
-
-(deftype #/(IteratorSeq E)
-  [meta value ^Iterator iter ^:mutable ^some _rest ^:mutable ^int __hash]
-  :type-only true
-  ^:mixin #/(dart-coll/ListMixin E)
-  ^:mixin EquivSequentialHashMixin
-  ^:mixin #/(SeqListMixin E)
-  (^#/(IteratorSeq R) #/(cast R) [coll]
-   (new #/(IteratorSeq R) meta value iter _rest __hash))
-  ISeqable
-  (-seq [this] this)
-  ISeq
-  (-first [coll] value)
-  (-rest [coll] (or _rest (set! _rest (or (iterator-seq iter) ()))))
-  (-next [coll] (-seq (-rest coll)))
-  ICollection
-  (-conj [coll o] (cons o coll))
-  IMeta
-  (-meta [coll] meta)
-  IWithMeta
-  (-with-meta [coll new-meta]
-    (if (identical? new-meta meta)
-      coll
-      (IteratorSeq. new-meta value iter _rest __hash))))
+    ;; calling seq here realizes eductions, so we wrap in a lazy seq.
+    ;; LazySeq's .sval only calls fn if it's a fn?, so we can avoid the cost of a thunk.
+    (not (fn? coll)) (Cons. nil x (LazySeq. nil coll nil -1) -1)
+    :else (throw (ArgumentError. "Cannot create cons from fn"))))
 
 (defn ^some iterator-seq [^Iterator iter]
   (when (.moveNext iter)
-    (IteratorSeq. nil (.-current iter) iter nil -1)))
+    (cons (.-current iter) (lazy-seq (iterator-seq iter)))))
+
+(declare chunked-iterator-sequence)
+
+;; assumes (.moveNext iter)
+(defn- chunked-iterator-seq*
+  [^Iterator iter ^int chunk-size]
+  (let [buf (chunk-buffer chunk-size)]
+    (chunk-append buf (.-current iter))
+    (loop [^int rem (dec chunk-size)]
+      (when (and (pos? rem) (.moveNext iter))
+        (chunk-append buf (.-current iter))
+        (recur (dec rem))))
+    (chunk-cons (chunk buf) (chunked-iterator-sequence iter chunk-size))))
+
+(defn chunked-iterator-sequence
+  ([^Iterator iter] (chunked-iterator-sequence iter 32))
+  ([^Iterator iter ^int chunk-size]
+   (lazy-seq
+     (when (.moveNext iter)
+       (chunked-iterator-seq* iter chunk-size)))))
 
 (defn ^some chunked-iterator-seq
   ([^Iterator iter] (chunked-iterator-seq iter 32))
   ([^Iterator iter ^int chunk-size]
    (when (.moveNext iter)
      (lazy-seq
-       (let [buf (chunk-buffer chunk-size)]
-         (chunk-append buf (.-current iter))
-         (loop [^int rem (dec chunk-size)]
-           (when (and (pos? rem) (.moveNext iter))
-             (chunk-append buf (.-current iter))
-             (recur (dec rem))))
-         (chunk-cons (chunk buf) (chunked-iterator-seq iter chunk-size)))))))
+       (chunked-iterator-seq* iter chunk-size)))))
 
 (extend-type Iterable
   ISeqable
@@ -3535,7 +3537,7 @@
     (if (nil? fn)
       s
       (do
-        (loop [ls (fn)]
+        (loop [ls (if (fn? fn) (fn) fn)]
           (if (dart/is? ls LazySeq)
             (recur (.sval ^LazySeq ls))
             (set! s (seq ls))))
@@ -3543,7 +3545,7 @@
         s)))
   IPending
   (-realized? [coll]
-    (not fn))
+    (nil? fn))
   IWithMeta
   (-with-meta [coll new-meta]
     (if (identical? new-meta meta)
@@ -3579,7 +3581,7 @@
   is called, and will cache the result and return it on all subsequent
   seq calls."
   [& body]
-  `(new cljd.core/LazySeq nil (fn [] ~@body) nil -1))
+  `(new cljd.core/LazySeq nil (fn [] (do ~@body)) nil -1))
 
 ;;; PersistentVector
 
@@ -7278,7 +7280,7 @@
 
 (defn sequence
   "Coerces coll to a (possibly empty) sequence, if it is not already
-  one. Will not force a lazy seq. (sequence nil) yields (), When a
+  one. Will not force a lazy seq. (sequence nil) yields (). When a
   transducer is supplied, returns a lazy sequence of applications of
   the transform to the items in coll(s), i.e. to the set of first
   items of each coll, followed by the set of second
@@ -7286,12 +7288,15 @@
   remaining items in other colls are ignored. The transform should accept
   number-of-colls arguments"
   ([coll]
-     (if (seq? coll) coll
-         (or (seq coll) ())))
+   (cond
+     (nil? coll) ()
+     (seq? coll) coll
+     (fn? coll) (throw (ArgumentError. "Cannot create sequence from fn"))
+     true (LazySeq. nil coll nil -1)))
   ([xform coll]
-     (or (chunked-iterator-seq (iterator xform coll)) ()))
+     (chunked-iterator-sequence (iterator xform coll)))
   ([xform coll & colls]
-   (or (chunked-iterator-seq (apply iterator xform coll colls)) ())))
+   (chunked-iterator-sequence (apply iterator xform coll colls))))
 
 (deftype #/(Eduction E)
   [xform coll ^:mutable ^int __hash]
@@ -7757,7 +7762,7 @@ specified.
   a dart:async Future.
   Use await, not deref to get the result (or the exception)."
   [& body]
-  `(Future/microtask (fn [] ~@body)))
+  `(Future/microtask (fn [] (do ~@body))))
 
 (defn- ^int hashrank
   "0x"
@@ -8381,7 +8386,7 @@ specified.
   comparator.  If any keys are equal, they are handled as if by
   repeated uses of assoc."
   ([comparator & keyvals]
-   (loop [m (HashRankedWideTreapMap nil -empty-treap-node 0 (dart-comparator comparator) comparator -1) kvs (seq keyvals)]
+   (loop [m (HashRankedWideTreapMap nil -empty-treap-node 0 (dart-comparator comparator) comparator -1) kvs keyvals]
      (if-some [[k & vkvs] kvs]
        (if-some [[v & kvs] vkvs]
          (recur (assoc m k v) kvs)
@@ -8665,7 +8670,7 @@ specified.
   conj."
   ([comparator & keys]
    (loop [m (HashRankedWideTreapSet. nil -empty-treap-node 0 (dart-comparator comparator) comparator -1)
-          ks (seq keys)]
+          ks keys]
      (if-some [[k & ks'] ks]
        (recur (conj m k) ks')
        m))))
