@@ -105,13 +105,13 @@
 
 (def ^:macro-support ^:private
   sigs
-  (fn [fdecl]
+  (fn [defmacro? fdecl]
     #_(assert-valid-fdecl fdecl)
     (let [asig
           (fn [fdecl]
             (let [arglist (first fdecl)
                   ;elide implicit macro args
-                  arglist (if (= '&form (first arglist))
+                  arglist (if defmacro?
                             (subvec arglist 2 (count arglist))
                             arglist)
                   body (next fdecl)]
@@ -142,6 +142,56 @@
             (seq ret)))
         (list (resolve-tag (asig fdecl)))))))
 
+(def ^:macro-support ^:private
+  defn-helper
+  (fn [defmacro? fname & fdecl]
+      ;; Note: Cannot delegate this check to def because of the call to (with-meta name ..)
+      (if (symbol? fname)
+        nil
+        (throw (argument-error "First argument to defn must be a symbol")))
+      (let [m (if (string? (first fdecl))
+                {:doc (first fdecl)}
+                {})
+            fdecl (if (string? (first fdecl))
+                    (next fdecl)
+                    fdecl)
+            m (if (map? (first fdecl))
+                (conj m (first fdecl))
+                m)
+            fdecl (if (map? (first fdecl))
+                    (next fdecl)
+                    fdecl)
+            fdecl (if (vector? (first fdecl))
+                    (list fdecl)
+                    fdecl)
+            m (if (map? (last fdecl))
+                (conj m (last fdecl))
+                m)
+            fdecl (if (map? (last fdecl))
+                    (butlast fdecl)
+                    fdecl)
+            m (conj {:arglists (list 'quote (sigs defmacro? fdecl))} m)
+            m (let [inline (:inline m)
+                    ifn (first inline)
+                    iname (second inline)]
+                ;; same as: (if (and (= 'fn ifn) (not (symbol? iname))) ...)
+                (if (if (= 'fn ifn)
+                      (if (symbol? iname) false true))
+                  ;; inserts the same fn name to the inline fn if it does not have one
+                  (assoc m :inline (cons ifn (cons (symbol (str (name fname) "__inliner"))
+                                                   (next inline))))
+                  m))
+            tag (or (when-not (next fdecl)
+                      ; when one arity, look at meta
+                      (-> fdecl ffirst meta :tag))
+                  (:tag (meta fname)))
+            m (assoc m :tag tag :schroupt (list 'quote (first fdecl)))
+            m (conj (if (meta fname) (meta fname) {}) m)]
+        (list 'def (with-meta fname m)
+              ;;todo - restore propagation of fn name
+              ;;must figure out how to convey primitive hints to self calls first
+              (with-meta (cons `fn fdecl) {:rettag (:tag m) :async (:async m)})))))
+
 (def
   ^{:macro true
     :doc "Same as (def name (fn [params* ] exprs*)) or (def
@@ -151,52 +201,7 @@
    :arglists '([name doc-string? attr-map? [params*] prepost-map? body]
                 [name doc-string? attr-map? ([params*] prepost-map? body)+ attr-map?])}
  defn (fn defn [&form &env fname & fdecl]
-        ;; Note: Cannot delegate this check to def because of the call to (with-meta name ..)
-        (if (symbol? fname)
-          nil
-          (throw (argument-error "First argument to defn must be a symbol")))
-        (let [m (if (string? (first fdecl))
-                  {:doc (first fdecl)}
-                  {})
-              fdecl (if (string? (first fdecl))
-                      (next fdecl)
-                      fdecl)
-              m (if (map? (first fdecl))
-                  (conj m (first fdecl))
-                  m)
-              fdecl (if (map? (first fdecl))
-                      (next fdecl)
-                      fdecl)
-              fdecl (if (vector? (first fdecl))
-                      (list fdecl)
-                      fdecl)
-              m (if (map? (last fdecl))
-                  (conj m (last fdecl))
-                  m)
-              fdecl (if (map? (last fdecl))
-                      (butlast fdecl)
-                      fdecl)
-              m (conj {:arglists (list 'quote (sigs fdecl))} m)
-              m (let [inline (:inline m)
-                      ifn (first inline)
-                      iname (second inline)]
-                  ;; same as: (if (and (= 'fn ifn) (not (symbol? iname))) ...)
-                  (if (if (= 'fn ifn)
-                        (if (symbol? iname) false true))
-                    ;; inserts the same fn name to the inline fn if it does not have one
-                    (assoc m :inline (cons ifn (cons (symbol (str (name fname) "__inliner"))
-                                                     (next inline))))
-                    m))
-              tag (or (when-not (next fdecl)
-                        ; when one arity, look at meta
-                        (-> fdecl ffirst meta :tag))
-                    (:tag (meta fname)))
-              m (assoc m :tag tag :schroupt (list 'quote (first fdecl)))
-              m (conj (if (meta fname) (meta fname) {}) m)]
-          (list 'def (with-meta fname m)
-                ;;todo - restore propagation of fn name
-                ;;must figure out how to convey primitive hints to self calls first
- 								(with-meta (cons `fn fdecl) {:rettag (:tag m) :async (:async m)})))))
+        (apply defn-helper false fname fdecl)))
 
 (def
  ^{:macro true
@@ -240,7 +245,7 @@
                           (if p
                             (recur (next p) (cons (first p) d))
                             d))]
-               (cons `defn decl))))
+               (apply defn-helper true decl))))
 
 (defmacro defn-
   "same as defn, yielding non-public def"
@@ -2327,7 +2332,7 @@
     x))
 
 (defmacro delay [& body]
-  `(new cljd.core/Delay nil (fn [] ~@body)))
+  `(new cljd.core/Delay nil (fn [] (do ~@body))))
 
 (defprotocol IEmptyableCollection
   "Protocol for creating an empty collection."
@@ -3576,7 +3581,7 @@
   is called, and will cache the result and return it on all subsequent
   seq calls."
   [& body]
-  `(new cljd.core/LazySeq nil (fn [] ~@body) nil -1))
+  `(new cljd.core/LazySeq nil (fn [] (do ~@body)) nil -1))
 
 ;;; PersistentVector
 
@@ -5915,10 +5920,13 @@
 (defn nthrest
   "Returns the nth rest of coll, coll when n is 0."
   [coll n]
-  (loop [^int n n xs coll]
-    (if-let [xs (and (pos? n) (seq xs))]
-      (recur (dec n) (rest xs))
-      xs)))
+  (if (zero? n)
+    coll
+    (lazy-seq
+      (loop [^int n n xs (seq coll)]
+        (if-let [xs (and (pos? n) xs)]
+          (recur (dec n) (next xs))
+          (or xs ()))))))
 
 (defn concat
   "Returns a lazy seq representing the concatenation of the elements in the supplied colls."
@@ -7757,7 +7765,7 @@ specified.
   a dart:async Future.
   Use await, not deref to get the result (or the exception)."
   [& body]
-  `(Future/microtask (fn [] ~@body)))
+  `(Future/microtask (fn [] (do ~@body))))
 
 (defn- ^int hashrank
   "0x"
