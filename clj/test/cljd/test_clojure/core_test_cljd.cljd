@@ -1116,7 +1116,7 @@
   (testing "sequence next"
     (let [realized (atom 0)]
       (next (sequence (map (fn [_] (swap! realized inc)) (lazy-range))))
-      (is (= 32 @realized)))
+      (is (= 1 @realized)))
     (testing "transducer"
       (let [realized (atom 0)]
         (next (sequence (map (fn [_] (swap! realized inc)) (lazy-range))))

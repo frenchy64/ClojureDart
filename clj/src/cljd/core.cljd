@@ -3245,7 +3245,7 @@
        h#)))
 
 (deftype #/(Cons E)
-  [meta _first ^ISeq rest ^:mutable ^int __hash]
+  [meta _first rest ^:mutable ^int __hash]
   :type-only true
   ^:mixin EquivSequentialHashMixin
   ^:mixin #/(dart-coll/ListMixin E)
@@ -3355,9 +3355,9 @@
     (nil? coll)            (PersistentList. nil x nil 1 -1)
     (satisfies? ISeq coll) (Cons. nil x coll -1)
     ;; calling seq here realizes eductions, so we wrap in a lazy seq.
-    ;; LazySeq's .sval only calls fn if it's a Fn, so we can avoid the cost of a thunk.
-    (not (satisfies? Fn coll)) (Cons. nil x (LazySeq. nil coll nil -1) -1)
-    :else (throw (ArgumentError. "Cannot create cons from Fn"))))
+    ;; LazySeq's .sval only calls fn if it's a fn?, so we can avoid the cost of a thunk.
+    (not (fn? coll)) (Cons. nil x (LazySeq. nil coll nil -1) -1)
+    :else (throw (ArgumentError. "Cannot create cons from fn"))))
 
 (defn ^some iterator-seq [^Iterator iter]
   (when (.moveNext iter)
@@ -3532,7 +3532,7 @@
     (if (nil? fn)
       s
       (do
-        (loop [ls (if (dart/is? ls Fn) (fn) fn)]
+        (loop [ls (if (fn? fn) (fn) fn)]
           (if (dart/is? ls LazySeq)
             (recur (.sval ^LazySeq ls))
             (set! s (seq ls))))
@@ -7283,8 +7283,11 @@
   remaining items in other colls are ignored. The transform should accept
   number-of-colls arguments"
   ([coll]
-     (if (seq? coll) coll
-         (or (seq coll) ())))
+   (cond
+     (nil? coll) ()
+     (seq? coll) coll
+     (fn? coll) (throw (ArgumentError. "Cannot create sequence from fn"))
+     true (LazySeq. nil coll nil -1)))
   ([xform coll]
      (chunked-iterator-sequence (iterator xform coll)))
   ([xform coll & colls]
